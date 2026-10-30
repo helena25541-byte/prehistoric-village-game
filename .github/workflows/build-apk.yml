@@ -42,11 +42,11 @@ jobs:
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort | tail -n 1)"
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager was not found in the preinstalled Android SDK."
+            echo "sdkmanager was not found."
             exit 1
           fi
 
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
 
           "$SDKMANAGER" --install \
             "platform-tools" \
@@ -59,7 +59,7 @@ jobs:
           unzip -q Godot_v4.7.2-stable_linux.x86_64.zip
           chmod +x Godot_v4.7.2-stable_linux.x86_64
 
-      - name: Install matching Godot Android export templates
+      - name: Install Godot Android export templates
         run: |
           mkdir -p "$HOME/.local/share/godot/export_templates/4.7.2.stable"
 
@@ -90,14 +90,17 @@ jobs:
 
       - name: Export Android APK
         run: |
-          mkdir -p prehistoric-tribe/build
+          APK_DIR="$GITHUB_WORKSPACE/prehistoric-tribe/build"
+          APK_PATH="$APK_DIR/PrehistoricTribe.apk"
+
+          mkdir -p "$APK_DIR"
 
           ./Godot_v4.7.2-stable_linux.x86_64 \
             --headless \
-            --path prehistoric-tribe \
-            --export-debug "Android" prehistoric-tribe/build/PrehistoricTribe.apk
+            --path "$GITHUB_WORKSPACE/prehistoric-tribe" \
+            --export-debug "Android" "$APK_PATH"
 
-          test -s prehistoric-tribe/build/PrehistoricTribe.apk
+          test -s "$APK_PATH"
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
