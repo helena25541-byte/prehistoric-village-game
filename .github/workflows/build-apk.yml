@@ -1,3 +1,4 @@
+
 name: Build Prehistoric Tribe APK
 
 on:
@@ -18,78 +19,87 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract game source
-        run: |
-          unzip -o prehistoric-tribe-source.zip -d .
-          test -f prehistoric-tribe/project.godot
-          test -f prehistoric-tribe/export_presets.cfg
-
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Configure Android SDK
+      - name: Install Android SDK
+        shell: bash
         run: |
           echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
-          echo "/usr/local/lib/android/sdk/platform-tools" >> "$GITHUB_PATH"
-          echo "/usr/local/lib/android/sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
 
-      - name: Accept Android SDK licenses and install packages
-        run: |
-          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort | tail -n 1)"
+          SDKMANAGER="$(find /usr/local/lib/android/sdk/cmdline-tools -type f -name sdkmanager | sort | tail -n 1)"
 
-          if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager was not found."
-            exit 1
-          fi
+          yes | "$SDKMANAGER" --licenses || true
 
-          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-
-          "$SDKMANAGER" --install \
+          "$SDKMANAGER" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.1"
 
-      - name: Download Godot 4.7.2 editor
+      - name: Download game source
+        shell: bash
+        run: |
+          unzip -o prehistoric-tribe-source.zip -d .
+          test -f prehistoric-tribe/project.godot
+          test -f prehistoric-tribe/scripts/main.gd
+
+      - name: Download Godot 4.7.2
+        shell: bash
         run: |
           wget -q https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
           unzip -q Godot_v4.7.2-stable_linux.x86_64.zip
           chmod +x Godot_v4.7.2-stable_linux.x86_64
 
-      - name: Install Godot Android export templates
+      - name: Install Godot export templates
+        shell: bash
         run: |
-          mkdir -p "$HOME/.local/share/godot/export_templates/4.7.2.stable"
-
           wget -q https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz
 
-          unzip -q Godot_v4.7.2-stable_export_templates.tpz -d /tmp/godot-templates
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.7.2.stable"
 
-          cp -a /tmp/godot-templates/templates/. "$HOME/.local/share/godot/export_templates/4.7.2.stable/"
+          unzip -q Godot_v4.7.2-stable_export_templates.tpz -d template_temp
+
+          cp -a template_temp/templates/. \
+            "$HOME/.local/share/godot/export_templates/4.7.2.stable/"
 
       - name: Configure Godot Android paths
+        shell: bash
         run: |
           mkdir -p "$HOME/.config/godot"
 
-          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<'EOF'
           [gd_resource type="EditorSettings" format=3]
+
           [resource]
-          export/android/android_sdk_path = "$ANDROID_HOME"
-          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/android_sdk_path = "/usr/local/lib/android/sdk"
+          export/android/java_sdk_path = "/usr/lib/jvm/temurin-17-jdk-amd64"
           EOF
 
-      - name: Import project
+      - name: Import and check project scripts
+        shell: bash
         run: |
+          set -o pipefail
+
           ./Godot_v4.7.2-stable_linux.x86_64 \
             --headless \
             --editor \
-            --path prehistoric-tribe \
-            --quit
+            --path "$GITHUB_WORKSPACE/prehistoric-tribe" \
+            --quit 2>&1 | tee godot-check.log
+
+          if grep -E "SCRIPT ERROR|Parse Error|Failed to load script" godot-check.log; then
+            echo "Godot script validation failed."
+            exit 1
+          fi
 
       - name: Export Android APK
+        shell: bash
         run: |
+          set -o pipefail
+
           APK_DIR="$GITHUB_WORKSPACE/prehistoric-tribe/build"
           APK_PATH="$APK_DIR/PrehistoricTribe.apk"
 
@@ -98,9 +108,18 @@ jobs:
           ./Godot_v4.7.2-stable_linux.x86_64 \
             --headless \
             --path "$GITHUB_WORKSPACE/prehistoric-tribe" \
-            --export-debug "Android" "$APK_PATH"
+            --export-debug "Android" "$APK_PATH" \
+            2>&1 | tee godot-export.log
+
+          if grep -E "SCRIPT ERROR|Parse Error|Project export.*failed" godot-export.log; then
+            echo "APK export failed."
+            exit 1
+          fi
 
           test -s "$APK_PATH"
+
+          echo "APK successfully created:"
+          ls -lh "$APK_PATH"
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
